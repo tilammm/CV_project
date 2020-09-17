@@ -1,5 +1,5 @@
 class Config:
-    voc_data_dir = '/dataset/PASCAL2007/VOC2007/'
+    voc_data_dir = '/images/'
     min_size = 600  # image resize
     max_size = 1000 # image resize
     num_workers = 8
@@ -21,7 +21,7 @@ class Config:
     plot_every = 40  
 
     # preset
-    data = 'voc'
+    data = 'DOTA'
     pretrained_model = 'vgg16'
 
     # training
