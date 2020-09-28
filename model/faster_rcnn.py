@@ -2,7 +2,7 @@ import torch as t
 import numpy as np
 from utils import convertor
 from torchvision.ops import nms
-
+from torchvision.ops import RoIPool
 from torchvision.models import vgg16
 from torch import nn
 from torch.nn import functional as F
@@ -242,11 +242,46 @@ class RegionProposalNetwork(nn.Module):
         return rpn_locs, rpn_scores, rois, roi_indices, anchor
 
 
+class Head(nn.Module):
+
+    def __init__(self, n_class, roi_size, spatial_scale,
+                 classifier):
+        
+        super(Head, self).__init__()
+
+        self.classifier = classifier
+        self.cls_loc = nn.Linear(4096, n_class * 4)
+        self.score = nn.Linear(4096, n_class)
+
+        normal_init(self.cls_loc, 0, 0.001)
+        normal_init(self.score, 0, 0.01)
+
+        self.n_class = n_class
+        self.roi_size = roi_size
+        self.spatial_scale = spatial_scale
+        self.roi = RoIPool( (self.roi_size, self.roi_size),self.spatial_scale)
+
+    def forward(self, x, rois, roi_indices):
+        
+        roi_indices = convertor.totensor(roi_indices).float()
+        rois = convertor.totensor(rois).float()
+        indices_and_rois = t.cat([roi_indices[:, None], rois], dim=1)
+        # NOTE: important: yx->xy
+        xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]
+        indices_and_rois =  xy_indices_and_rois.contiguous()
+
+        pool = self.roi(x, indices_and_rois)
+        pool = pool.view(pool.size(0), -1)
+        fc7 = self.classifier(pool)
+        roi_cls_locs = self.cls_loc(fc7)
+        roi_scores = self.score(fc7)
+        return roi_cls_locs, roi_scores
 
 
 class FasterRCNN(nn.Module):
     feat_stride = 16
-    def __init__(self,  head,
+    def __init__(self,
+                n_fg_class,
                 loc_normalize_mean = (0., 0., 0., 0.),
                 loc_normalize_std = (0.1, 0.1, 0.2, 0.2),
                 ratios=[0.5, 1, 2],
@@ -261,7 +296,10 @@ class FasterRCNN(nn.Module):
             feat_stride=self.feat_stride,
         )
 
-        self.head = head
+        self.head = Head(n_class=n_fg_class + 1,
+            roi_size=7,
+            spatial_scale=(1. / self.feat_stride),
+            classifier=self.classifier)
 
         # mean and std
         self.loc_normalize_mean = loc_normalize_mean

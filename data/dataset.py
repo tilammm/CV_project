@@ -26,47 +26,48 @@ def _areas(boxes):
     return areas
 
 
+def read_images(imgs_path, lbls_path):
+    imgs = []
+    lbls = []
+    i = 0
+    for img in glob.glob(imgs_path + '*.png'):
+        imgs.append(img)
+        i += 1
+    
+    j = 0
+    for lbl in glob.glob(lbls_path + '*.txt'):
+        with open(lbl) as lbl_file:
+            array = lbl_file.readlines()
+        
+        lbls.append(array[2:])
+        j+=1
+        if j == i:
+            break
+    
+    return imgs, lbls
+
+
 class DOTADataset(Dataset):
     def __init__(self, images_root_directory,
-                 images_list,
-                 labels_csv_file_name,
-                 phase):
+                 labels_directory,
+                 transforms):
         super(DOTADataset).__init__()
         self.images_root_directory = images_root_directory
-        self.phase = phase
-        self.images_list = images_list
-        if self.phase in ["train", "val"]:
-            self.labels_dataframe = pd.read_csv(os.path.join(images_root_directory, labels_csv_file_name))
+        self.images, self.labels = read_images(images_root_directory, labels_directory)
+        for i in range(len(self.labels)):
+            for j in range(len(self.labels[i])):
+                self.labels[i][j] = self.labels[i][j].split()
+                self.labels[i][j][8] = label_dict[self.labels[i][j][8]]
+        self.transforms = transforms
+            
 
-    def __getitem__(self, item):
-        sample = {
-            "local_image_id": None,
-            "image_id": None,
-            "labels": None,
-            "boxes": None,
-            "area": None
-        }
-
-        image_id = self.images_list[item]
-        image_path = os.path.join(self.images_root_directory,
-                                  "train" if self.phase in ["train", "val"] else "test",
-                                  image_id + ".jpg")
-        image = cv2.imread(image_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
-        image /= 255.0
-        sample["local_image_id"] = image_id
-        sample["image_id"] = torch.tensor([item])
-        if self.phase in ["train", "val"]:
-            boxes = self.labels_dataframe[self.labels_dataframe.image_id == image_id].bbox.values.tolist()
-            boxes = [eval(box_i) for box_i in boxes]
-            areas = _areas(boxes)
-            boxes = _adjust_boxes_format(boxes)
-
-            sample["labels"] = torch.ones((len(boxes),), dtype=torch.int64)
-            sample["boxes"] = torch.as_tensor(boxes, dtype=torch.float32)
-            sample["area"] = torch.as_tensor(areas, dtype=torch.float32)
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        labels = self.labels[idx]
+            
+        img = Image.open(image).convert('RGB')
         
-        return image, sample
+        return self.transforms(img), labels
 
     def __len__(self):
-        return len(self.images_list)
+        return len(self.images)
